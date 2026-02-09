@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Online Walkie Talkie</title>
+</head>
+<body>
+  <h2>Online Walkie Talkie</h2>
+
+  <input id="freq" placeholder="Enter Frequency (e.g. 101)">
+  <button onclick="join()">Join</button>
+  <br><br>
+
+  <button id="talkBtn" disabled>Push To Talk</button>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    let frequency = "";
+    let localStream;
+    let peerConnections = {};
+    let talking = false;
+
+    async function join() {
+      frequency = document.getElementById("freq").value;
+      socket.emit("join-frequency", frequency);
+
+      localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      document.getElementById("talkBtn").disabled = false;
+    }
+
+    document.getElementById("talkBtn").onmousedown = startTalking;
+    document.getElementById("talkBtn").onmouseup = stopTalking;
+
+    function startTalking() {
+      talking = true;
+      localStream.getAudioTracks()[0].enabled = true;
+    }
+
+    function stopTalking() {
+      talking = false;
+      localStream.getAudioTracks()[0].enabled = false;
+    }
+
+    socket.on("user-joined", (id) => {
+      createPeer(id);
+    });
+
+    socket.on("signal", async (data) => {
+      if (!peerConnections[data.from]) {
+        createPeer(data.from, false);
+      }
+      await peerConnections[data.from].setRemoteDescription(
+        new RTCSessionDescription(data.signal)
+      );
+    });
+
+    function createPeer(id, initiator = true) {
+      const pc = new RTCPeerConnection();
+
+      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+      pc.ontrack = (event) => {
+        const audio = document.createElement("audio");
+        audio.srcObject = event.streams[0];
+        audio.autoplay = true;
+      };
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          socket.emit("signal", {
+            to: id,
+            from: socket.id,
+            frequency: frequency,
+            signal: event.candidate
+          });
+        }
+      };
+
+      peerConnections[id] = pc;
+    }
+  </script>
+</body>
+</html>
